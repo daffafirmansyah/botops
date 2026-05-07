@@ -1,5 +1,5 @@
 {
-  "_comment": "Drop in this file to define guaranteed/FCFS/allowlist phases that the bot can mint. Reference it from config.json -> 'allowlists': ['allowlist.example.json'].",
+  "_comment": "Drop in this file to define guaranteed/FCFS/allowlist phases that the bot can mint. Reference it from config.json -> 'allowlists': ['allowlist.json'].",
   "phases": [
     {
       "name": "Guaranteed",

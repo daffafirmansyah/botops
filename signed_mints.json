@@ -1,5 +1,5 @@
 {
-  "_comment": "Template untuk Guaranteed/FCFS phase yang pakai signed mint (mintSigned). Drop OpenSea Studio modern banyak yang pakai ini. Reference dari config.json -> 'allowlists': ['signed_mints.example.json'].",
+  "_comment": "Template untuk Guaranteed/FCFS phase yang pakai signed mint (mintSigned). Drop OpenSea Studio modern banyak yang pakai ini. Reference dari config.json -> 'allowlists': ['signed_mints.json'].",
   "_how_to_get_data": [
     "1. Buka halaman drop di OpenSea + connect wallet kamu",
     "2. Open DevTools (F12) -> Network tab, filter 'mint' atau 'sign'",
@@ -7,7 +7,7 @@
     "4. Cari request ke OpenSea backend yang return JSON berisi 'salt' dan 'signature'",
     "5. Copy nilai start_time, end_time, mint_price (dalam wei), salt, dan signature ke entry di bawah",
     "6. Cancel MetaMask popup",
-    "7. Save file ini, jalankan bot dengan config.json -> allowlists: ['signed_mints.example.json']"
+    "7. Save file ini, jalankan bot dengan config.json -> allowlists: ['signed_mints.json']"
   ],
   "phases": [
     {

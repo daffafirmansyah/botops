@@ -52,7 +52,7 @@ pip install -r requirements.txt
 
 ### 2. Siapkan wallet
 
-Salin `wallets.example.txt` menjadi `wallets.txt` dan isi private key:
+Buat file `wallets.txt` (lihat format di bawah) dan isi private key satu per baris:
 
 ```
 0xPRIVATEKEY1,wallet_utama
@@ -60,13 +60,16 @@ Salin `wallets.example.txt` menjadi `wallets.txt` dan isi private key:
 0xPRIVATEKEY3,alt2
 ```
 
+Format: `PRIVATE_KEY[,LABEL]`. Label opsional, dipakai untuk log.
+
 > **PENTING**: Jangan pernah commit `wallets.txt`. Folder sudah memuat
 > `.gitignore` yang mengecualikan file ini.
 
 ### 3. (Opsional) Siapkan config
 
-Salin `config.example.json` menjadi `config.json` dan sesuaikan. Bot juga
-bisa dijalankan tanpa file config (menu interaktif).
+Buat file `config.json` di folder project. Bot juga bisa dijalankan tanpa
+file config (menu interaktif). Untuk struktur lengkap, lihat section
+[Config](#config) di bawah.
 
 ---
 
@@ -185,7 +188,7 @@ Sumber data:
 
 OpenSea sering merotasi endpoint allowlist publiknya, jadi cara paling
 andal untuk Guaranteed/FCFS adalah menyediakan file allowlist manual
-(lihat `allowlist.example.json` untuk merkle, `signed_mints.example.json`
+(lihat `allowlist.json` untuk merkle, `signed_mints.json`
 untuk signed). Format minimal merkle:
 
 ```json
@@ -211,7 +214,7 @@ untuk signed). Format minimal merkle:
 Lalu di `config.json`:
 
 ```json
-"allowlists": ["allowlist.example.json"]
+"allowlists": ["allowlist.json"]
 ```
 
 > Tip: kamu bisa scrape proofs dari halaman OpenSea (Network tab → cari
@@ -260,7 +263,7 @@ termasuk di detik mint mulai persis, multi-wallet paralel, gas tinggi.
    ```
 
 5. **Cancel MetaMask popup** (tidak perlu mint via UI).
-6. **Copy** ke `signed_mints.json` (lihat `signed_mints.example.json`):
+6. **Copy** ke `signed_mints.json` (file template tersedia di repo):
 
    ```json
    {
@@ -401,10 +404,8 @@ Contoh output ringkas:
 ```
 opensea-mint-bot/
 ├── main.py                     # CLI entry point
-├── config.example.json         # template konfigurasi
-├── wallets.example.txt         # template wallets
-├── allowlist.example.json      # template merkle allowlist
-├── signed_mints.example.json   # template signed mint (Guaranteed/FCFS modern)
+├── allowlist.json              # template merkle allowlist (edit per drop)
+├── signed_mints.json           # template signed mint (edit per drop)
 ├── requirements.txt
 ├── .gitignore
 └── bot/
