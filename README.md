@@ -1,5 +1,3 @@
-# OpenSea NFT Mint Bot
-
 Bot Python untuk mint NFT di **OpenSea (SeaDrop)** dengan dukungan
 multi-akun, multi-chain (Ethereum, Base, Arbitrum, Optimism, Polygon),
 pengaturan gas yang fleksibel, deteksi otomatis fase mint
