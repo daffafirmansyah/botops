@@ -1,0 +1,15 @@
+# OpenSea Mint Bot - Wallets File
+# -------------------------------------------------------------
+# Format (one wallet per line):
+#   PRIVATE_KEY[,LABEL]
+#
+# - PRIVATE_KEY: 64-hex-char private key, with or without 0x prefix
+# - LABEL:       optional human-readable name for logs (no spaces)
+# - Lines starting with '#' or empty lines are ignored
+#
+# WARNING: Never share or commit this file. Add it to .gitignore.
+# -------------------------------------------------------------
+
+# 0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789,main
+# 0x1111111111111111111111111111111111111111111111111111111111111111,alt1
+# 0x2222222222222222222222222222222222222222222222222222222222222222,alt2

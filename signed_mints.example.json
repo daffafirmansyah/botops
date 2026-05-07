@@ -1,0 +1,51 @@
+{
+  "_comment": "Template untuk Guaranteed/FCFS phase yang pakai signed mint (mintSigned). Drop OpenSea Studio modern banyak yang pakai ini. Reference dari config.json -> 'allowlists': ['signed_mints.example.json'].",
+  "_how_to_get_data": [
+    "1. Buka halaman drop di OpenSea + connect wallet kamu",
+    "2. Open DevTools (F12) -> Network tab, filter 'mint' atau 'sign'",
+    "3. Klik tombol Mint di OpenSea (JANGAN confirm tx di MetaMask)",
+    "4. Cari request ke OpenSea backend yang return JSON berisi 'salt' dan 'signature'",
+    "5. Copy nilai start_time, end_time, mint_price (dalam wei), salt, dan signature ke entry di bawah",
+    "6. Cancel MetaMask popup",
+    "7. Save file ini, jalankan bot dengan config.json -> allowlists: ['signed_mints.example.json']"
+  ],
+  "phases": [
+    {
+      "name": "Guaranteed",
+      "type": "signed",
+      "start_time": 1735689600,
+      "end_time":   1735693200,
+      "mint_price_wei": "10000000000000000",
+      "max_per_wallet": 1,
+      "fee_bps": 250,
+      "fee_recipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "drop_stage_index": 1,
+      "max_token_supply_for_stage": 5000,
+      "restrict_fee_recipients": true,
+      "signed_mints": {
+        "0xYourWalletAddressLowercase00000000000000": {
+          "salt": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+          "signature": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1b"
+        },
+        "0xAnotherWalletAddressLowercase0000000000": {
+          "salt": "987654321",
+          "signature": "0xdeadbeef..."
+        }
+      }
+    },
+    {
+      "name": "FCFS",
+      "type": "signed",
+      "start_time": 1735693200,
+      "end_time":   1735696800,
+      "mint_price_wei": "15000000000000000",
+      "max_per_wallet": 2,
+      "fee_bps": 250,
+      "fee_recipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "drop_stage_index": 2,
+      "max_token_supply_for_stage": 0,
+      "restrict_fee_recipients": true,
+      "signed_mints": {}
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local secrets / configs
+config.json
+wallets.txt
+wallets.json
+.env
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/

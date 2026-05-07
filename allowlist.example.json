@@ -1,0 +1,40 @@
+{
+  "_comment": "Drop in this file to define guaranteed/FCFS/allowlist phases that the bot can mint. Reference it from config.json -> 'allowlists': ['allowlist.example.json'].",
+  "phases": [
+    {
+      "name": "Guaranteed",
+      "type": "guaranteed",
+      "start_time": 1735689600,
+      "end_time":   1735693200,
+      "mint_price_wei": "10000000000000000",
+      "max_per_wallet": 1,
+      "fee_bps": 250,
+      "fee_recipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "drop_stage_index": 1,
+      "max_token_supply_for_stage": 5000,
+      "restrict_fee_recipients": true,
+      "merkle_root": "0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+      "proofs": {
+        "0xYourWalletAddressHere00000000000000000000": [
+          "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "0x2222222222222222222222222222222222222222222222222222222222222222"
+        ]
+      }
+    },
+    {
+      "name": "FCFS",
+      "type": "fcfs",
+      "start_time": 1735693200,
+      "end_time":   1735696800,
+      "mint_price_wei": "15000000000000000",
+      "max_per_wallet": 2,
+      "fee_bps": 250,
+      "fee_recipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "drop_stage_index": 2,
+      "max_token_supply_for_stage": 0,
+      "restrict_fee_recipients": true,
+      "merkle_root": "0x...",
+      "proofs": {}
+    }
+  ]
+}
