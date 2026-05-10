@@ -106,7 +106,7 @@
         panel = document.createElement('div');
         panel.id = 'sniper-panel';
         panel.style.cssText = [
-            'position:fixed', 'top:12px', 'right:12px', 'z-index:2147483647',
+            'position:fixed', 'bottom:12px', 'right:12px', 'z-index:2147483647',
             'background:rgba(15,23,42,0.95)', 'color:#f1f5f9',
             'border:1px solid #22c55e', 'border-radius:8px',
             'padding:10px 14px', 'font:12px/1.45 -apple-system,Segoe UI,Roboto,sans-serif',
