@@ -586,11 +586,18 @@ def run_sniper_flow(
     # Build wallet lookup by address (lowercase)
     wallet_by_addr: Dict[str, Wallet] = {w.address.lower(): w for w in wallets}
 
-    # Pick signed-mint phase. If absent, try any phase as fallback.
+    # Pick signed-mint phase. Stubs (on-chain hint without data) are fine here:
+    # the userscript will provide salt+signature at fire time, regardless of
+    # whether the user pre-supplied signed_mints.json.
     signed_phases = [p for p in plan.phases if p.is_signed]
     if not signed_phases:
-        log.warning("Sniper: no signed-mint phase found; will fall back to first phase on demand")
-    target_phase = signed_phases[0] if signed_phases else (plan.phases[0] if plan.phases else None)
+        log.warning("Sniper: no signed-mint phase found; will fall back to first non-stub phase on demand")
+    fallback_phases = [p for p in plan.phases if not p.is_stub]
+    target_phase = (
+        signed_phases[0]
+        if signed_phases
+        else (fallback_phases[0] if fallback_phases else None)
+    )
     if target_phase is None:
         print(f"{C_ERR}No phases available to mint.{C_RESET}")
         return 1
@@ -624,8 +631,8 @@ def run_sniper_flow(
 
         # Build a synthetic eligibility entry containing the signature
         elig = WalletEligibility(
-            wallet=wallet.address,
-            phase_name=target_phase.name,
+            wallet_address=wallet.address,
+            phase=target_phase,
             eligible=True,
             remaining_for_wallet=mint_cfg.quantity,
             salt=payload.salt,
@@ -701,6 +708,24 @@ def run_full_flow(cfg: Dict, *, check_only: bool = False) -> int:
     if not target_phases:
         print(f"{C_WARN}No phases match preference '{pref}'.{C_RESET}")
         return 1
+
+    # Filter out stub phases (on-chain detected but no proof/signature data).
+    # They show up in --check for visibility but cannot be fired against.
+    stubs = [p for p in target_phases if p.is_stub]
+    if stubs:
+        for p in stubs:
+            print(
+                f"{C_WARN}Skipping '{p.name}' ({p.phase_type}): "
+                f"phase detected on-chain but no proof/signature supplied. "
+                f"Run with --check for guidance.{C_RESET}"
+            )
+        target_phases = [p for p in target_phases if not p.is_stub]
+        if not target_phases:
+            print(
+                f"{C_WARN}All matching phases require off-chain data "
+                f"(allowlist proofs or signed-mint signatures). Cannot proceed.{C_RESET}"
+            )
+            return 1
 
     # Filter out ended phases
     now = now_unix()

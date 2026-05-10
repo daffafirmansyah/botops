@@ -186,6 +186,25 @@ Sumber data:
 > merkle proof. Lihat section [Signed Mint](#signed-mint-guaranteed--fcfs-modern)
 > di bawah untuk cara dapat signature-nya.
 
+### Stub phases ("data needed")
+
+Saat bot mendeteksi **merkle root** atau **signers** terdaftar on-chain
+namun kamu **belum supply** `allowlist.json` / `signed_mints.json`, bot akan
+menampilkan **stub phase** dengan status `data needed` di tabel eligibility.
+Contoh:
+
+```
+Mint phases:
+  [0] Allowlist (data missing)  type=allowlist  price=0.0000 ETH  max/wallet=0  status=data needed
+  [1] Signed Mint (data missing) type=signed     price=0.0000 ETH  max/wallet=0  status=data needed
+  [2] Public                     type=public     price=0.0015 ETH  max/wallet=10 status=live
+```
+
+Stub ini memberi petunjuk **dimana eligibility tidak bisa diverifikasi** dan
+apa yang perlu kamu lakukan (scrape proof / signature dari DevTools, atau
+pakai sniper mode). Saat fire mode dijalankan, stub di-skip otomatis dengan
+warning agar tidak mengirim transaksi yang pasti revert.
+
 OpenSea sering merotasi endpoint allowlist publiknya, jadi cara paling
 andal untuk Guaranteed/FCFS adalah menyediakan file allowlist manual
 (lihat `allowlist.json` untuk merkle, `signed_mints.json`

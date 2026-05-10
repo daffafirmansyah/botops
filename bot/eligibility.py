@@ -27,6 +27,10 @@ from .logger import get_logger
 from .opensea_api import OpenSeaClient
 from .seadrop import (
     MintPhase,
+    PHASE_ALLOWLIST,
+    PHASE_FCFS,
+    PHASE_GUARANTEED,
+    PHASE_SIGNED,
     fetch_allowlist_root,
     fetch_mint_stats,
     fetch_public_drop,
@@ -175,7 +179,63 @@ def discover_phases(
         except Exception as exc:  # pragma: no cover
             log.debug("OpenSea drop enrichment failed: %s", exc)
 
-    # Sort by start time so consumers can iterate in chronological order
+    # ------------------------------------------------------------------
+    # Gap detection: on-chain says allowlist/signed phase exists but no
+    # manual data was supplied. Add a "stub" phase so the eligibility
+    # report still surfaces the phase with actionable guidance, instead
+    # of silently dropping it. Stubs are marked source="onchain_partial"
+    # so fire mode can skip them.
+    # ------------------------------------------------------------------
+    has_allowlist_phase = any(
+        p.phase_type in (PHASE_GUARANTEED, PHASE_FCFS, PHASE_ALLOWLIST)
+        for p in phases
+    )
+    has_signed_phase = any(p.phase_type == PHASE_SIGNED for p in phases)
+
+    if root and not has_allowlist_phase:
+        phases.append(
+            MintPhase(
+                name="Allowlist (data missing)",
+                phase_type=PHASE_ALLOWLIST,
+                start_time=0,
+                end_time=0,
+                mint_price_wei=0,
+                max_per_wallet=0,
+                merkle_root=root,
+                source="onchain_partial",
+            )
+        )
+        log.warning(
+            "On-chain allowlist root detected but no proof file supplied. "
+            "Edit allowlist.json with your wallet's merkle proof "
+            "(scrape from OpenSea Network tab in DevTools), then reference it "
+            "via config.json -> 'allowlists': ['allowlist.json']."
+        )
+
+    if signers and not has_signed_phase:
+        signers_short = ", ".join(signers[:2]) + ("..." if len(signers) > 2 else "")
+        phases.append(
+            MintPhase(
+                name="Signed Mint (data missing)",
+                phase_type=PHASE_SIGNED,
+                start_time=0,
+                end_time=0,
+                mint_price_wei=0,
+                max_per_wallet=0,
+                source="onchain_partial",
+            )
+        )
+        log.warning(
+            "On-chain signed-mint signers (%s) detected but no signature data supplied. "
+            "Options: (a) scrape salt+signature from OpenSea DevTools when clicking Mint, "
+            "save to signed_mints.json. (b) Use --sniper mode + Tampermonkey for "
+            "automatic capture (see SNIPER_SETUP.md).",
+            signers_short,
+        )
+
+    # Sort by start time so consumers can iterate in chronological order.
+    # Stub phases (start_time=0) end up first; that's fine since they're
+    # surfaced for visibility and skipped in fire mode.
     phases.sort(key=lambda p: (p.start_time or 0, 0 if p.is_public else 1))
     return DropPlan(
         chain=chain,
@@ -265,14 +325,22 @@ def evaluate_eligibility(
         if phase.is_signed:
             sig_data = phase.signature_for(wallet)
             eligible = bool(sig_data and sig_data.get("signature"))
+            is_stub = phase.source == "onchain_partial"
             if eligible and remaining <= 0:
                 reason = f"have signature but already minted max ({minted})"
             elif eligible:
                 reason = f"have signed-mint payload for '{phase.name}'"
+            elif is_stub:
+                reason = (
+                    "signed-mint phase detected on-chain. To check this wallet's "
+                    "eligibility: (a) scrape salt+signature from OpenSea DevTools "
+                    "when clicking Mint, save to signed_mints.json, or "
+                    "(b) re-enable --sniper mode with Tampermonkey for auto-capture."
+                )
             else:
                 reason = (
                     f"no signed-mint signature for '{phase.name}' "
-                    "(scrape signature from OpenSea DevTools and add to your "
+                    "(scrape signature from OpenSea DevTools and add to "
                     "signed_mints.json - see README)"
                 )
             results.append(
@@ -305,10 +373,18 @@ def evaluate_eligibility(
                 log.debug("Proof fetch failed for %s: %s", wallet, exc)
 
         eligible = bool(proof)
+        is_stub = phase.source == "onchain_partial"
         if eligible and remaining <= 0:
             reason = f"on allowlist but already minted max ({minted})"
         elif eligible:
             reason = f"on '{phase.name}' allowlist"
+        elif is_stub:
+            reason = (
+                "allowlist phase detected on-chain. To check this wallet's "
+                "eligibility: scrape merkle proof from OpenSea DevTools "
+                "(Network tab, look for response containing 'proof' array) and add "
+                "to allowlist.json -> 'proofs' map."
+            )
         else:
             reason = f"not on '{phase.name}' allowlist"
 

@@ -82,7 +82,14 @@ class MintPhase:
     def signature_for(self, address: str) -> Dict[str, str]:
         return self.signed_mints.get(address.lower(), {})
 
+    @property
+    def is_stub(self) -> bool:
+        """True when phase was inferred from on-chain hints but lacks proof/signature data."""
+        return self.source == "onchain_partial"
+
     def status(self, now_ts: int) -> str:
+        if self.is_stub:
+            return "data needed"
         if self.start_time <= 0:
             return "not configured"
         if now_ts < self.start_time:
