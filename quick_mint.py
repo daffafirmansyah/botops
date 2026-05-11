@@ -105,10 +105,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                         help=f"Chain key: {'/'.join(CHAINS.keys())} (default: ethereum)")
     parser.add_argument("qty", nargs="?", type=int, default=1,
                         help="Quantity per wallet (default: 1)")
+    parser.add_argument("--config", default=None,
+                        help="Optional config.json — only used to source rpc_url / rpc_urls / opensea_api_key, "
+                             "everything else is taken from CLI args. Lets you reuse an existing config "
+                             "without dealing with shell escape rules.")
     parser.add_argument("--wallets-file", default="wallets.txt",
                         help="Path to wallets file (default: wallets.txt)")
     parser.add_argument("--rpc", default=None,
-                        help="Custom RPC URL (Alchemy/Infura/etc)")
+                        help="Custom RPC URL (Alchemy/Infura/etc). Overrides --config rpc.")
     parser.add_argument("--opensea-key", default=os.environ.get("OPENSEA_API_KEY", ""),
                         help="Optional OpenSea API key (for richer drop info)")
     parser.add_argument("--sniper-host", default="127.0.0.1",
@@ -245,13 +249,37 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"{C_ERR}Unknown chain: {chain_key}. Available: {', '.join(CHAINS.keys())}{C_RESET}")
         return 2
 
-    # --- build minimal cfg (avoids needing config.json) -----------------
+    # --- optionally pull rpc / api key from existing config.json --------
+    cfg_from_file: Dict = {}
+    if args.config:
+        try:
+            import json as _json
+            with open(args.config, "r", encoding="utf-8") as fh:
+                cfg_from_file = _json.load(fh)
+            log.info("Loaded config from %s", args.config)
+        except Exception as exc:
+            print(f"  {C_WARN}Could not read --config {args.config}: {exc}{C_RESET}")
+            cfg_from_file = {}
+
+    rpc_from_file = ""
+    if cfg_from_file:
+        # rpc_urls (per-chain map) wins; fall back to legacy rpc_url
+        rpc_map = cfg_from_file.get("rpc_urls") or {}
+        if isinstance(rpc_map, dict):
+            rpc_from_file = (rpc_map.get(chain_key) or "").strip()
+        if not rpc_from_file:
+            rpc_from_file = (cfg_from_file.get("rpc_url") or "").strip()
+
+    rpc_url = (args.rpc or "").strip() or rpc_from_file
+    opensea_key = (args.opensea_key or "").strip() or (cfg_from_file.get("opensea_api_key") or "").strip()
+
+    # --- build minimal cfg (avoids needing config.json for everything) ---
     cfg: Dict = {
         "nft_contract": contract,
         "chain": chain_key,
-        "rpc_url": args.rpc or "",
+        "rpc_url": rpc_url,
         "wallets_file": args.wallets_file,
-        "opensea_api_key": args.opensea_key or "",
+        "opensea_api_key": opensea_key,
         "mint": {
             "amount_per_wallet": max(1, int(args.qty)),
             "max_retries": 2,
