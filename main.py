@@ -55,6 +55,11 @@ from bot.minter import (
     execute_mint_batch,
 )
 from bot.opensea_api import OpenSeaClient
+from bot.phase_eligibility import (
+    ScheduleConfig,
+    format_matrix as format_phase_matrix,
+    load_from_cfg as load_phase_schedule,
+)
 from bot.seadrop import MintPhase, fetch_collection_meta
 from bot.utils import (
     fmt_eth,
@@ -585,6 +590,21 @@ def run_sniper_flow(
 
     # Build wallet lookup by address (lowercase)
     wallet_by_addr: Dict[str, Wallet] = {w.address.lower(): w for w in wallets}
+    wallet_labels: Dict[str, str] = {w.address.lower(): w.label or "" for w in wallets}
+
+    # Per-wallet phase eligibility (manual, from config). If user supplied a
+    # phase_schedule + wallet_eligibility map, sniper will refuse signatures
+    # that don't match the active phase for that wallet. This is a defensive
+    # check on top of the userscript's time guard.
+    schedule: ScheduleConfig = load_phase_schedule(cfg)
+    if schedule.phases:
+        log.info("Sniper: phase_schedule loaded with %d window(s)", len(schedule.phases))
+    if schedule.eligibility:
+        log.info("Sniper: wallet_eligibility map loaded for %d wallet(s)", len(schedule.eligibility))
+        print(f"\n{C_HEAD}Wallet eligibility matrix:{C_RESET}")
+        print(format_phase_matrix(schedule, wallet_labels))
+    else:
+        log.info("Sniper: no wallet_eligibility configured — bot will fire any signature from a known wallet")
 
     # Pick signed-mint phase. Stubs (on-chain hint without data) are fine here:
     # the userscript will provide salt+signature at fire time, regardless of
@@ -623,6 +643,19 @@ def run_sniper_flow(
         if payload.contract and payload.contract.lower() != nft_contract.lower():
             log.warning("Sniper: payload contract %s != configured %s — proceeding anyway",
                         payload.contract, nft_contract)
+
+        # Per-wallet phase eligibility check (no-op when schedule is empty).
+        # Rejects signatures that don't match the active phase for that wallet,
+        # saving gas on transactions that would revert on-chain.
+        if schedule.phases:
+            ok, reason, active_phase = schedule.validate_signature(addr)
+            phase_label = active_phase.name if active_phase else "none"
+            if not ok:
+                log.warning("Sniper: REJECT wallet=%s active_phase=%s reason=%s",
+                            short_addr(addr), phase_label, reason)
+                return False, reason
+            log.info("Sniper: phase check OK wallet=%s active_phase=%s",
+                     short_addr(addr), phase_label)
 
         with fire_lock:
             if addr in fired_wallets:

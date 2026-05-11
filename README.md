@@ -205,6 +205,41 @@ apa yang perlu kamu lakukan (scrape proof / signature dari DevTools, atau
 pakai sniper mode). Saat fire mode dijalankan, stub di-skip otomatis dengan
 warning agar tidak mengirim transaksi yang pasti revert.
 
+### Per-wallet phase eligibility (sniper mode)
+
+Drop SeaDrop modern (KOL WL / GTD WL / FCFS WL / Public) hanya dibedakan
+di backend OpenSea — kontrak cuma melihat `mintSigned`. Karena tiap wallet
+bisa eligible di phase berbeda, bot dapat ditugaskan jadwal phase + map
+eligibility manual lewat `config.json`:
+
+```json
+{
+  "phase_schedule": {
+    "KOL WL":  { "start": "2026-05-11T15:00:00Z", "end": "2026-05-11T15:15:00Z" },
+    "GTD WL":  { "start": "2026-05-11T15:15:00Z", "end": "2026-05-11T15:45:00Z" },
+    "FCFS WL": { "start": "2026-05-11T15:45:00Z", "end": "2026-05-11T16:15:00Z" },
+    "Public":  { "start": "2026-05-11T16:15:00Z", "end": "2026-05-11T16:45:00Z" }
+  },
+  "wallet_eligibility": {
+    "0xMAIN_ADDR": ["FCFS WL", "Public"],
+    "0xDENI_ADDR": ["KOL WL",  "Public"]
+  }
+}
+```
+
+Saat sniper mode aktif, bot:
+
+1. Print eligibility matrix pas startup (per wallet × phase, `OK` / `--`).
+2. Untuk tiap signature masuk: tentukan phase aktif sekarang (UTC ± 60s
+   tolerance), cek apakah wallet ada di list eligibility phase tsb.
+3. Kalau tidak eligible — **tolak tx** dengan log `REJECT wallet=... reason=...`
+   sehingga gas tidak terbuang untuk transaksi yang pasti revert on-chain.
+
+Kalau key `phase_schedule` / `wallet_eligibility` kosong/absent, fitur ini
+off dan bot fire signature apapun dari wallet yang terdaftar di
+`wallets.txt` (perilaku lama). Cocok untuk drop sederhana 1-phase atau
+kalau sudah trust Tampermonkey time guard.
+
 OpenSea sering merotasi endpoint allowlist publiknya, jadi cara paling
 andal untuk Guaranteed/FCFS adalah menyediakan file allowlist manual
 (lihat `allowlist.json` untuk merkle, `signed_mints.json`
