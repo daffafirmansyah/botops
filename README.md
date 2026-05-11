@@ -75,7 +75,39 @@ file config (menu interaktif). Untuk struktur lengkap, lihat section
 
 ## Menjalankan
 
-### Mode interaktif (rekomendasi pemula)
+### `quick_mint.py` — single-command all-in-one (RECOMMENDED)
+
+Untuk drop tunggal yang straightforward, gunakan entry point baru ini.
+Cukup satu perintah, **tidak perlu** edit `config.json` atau file
+allowlist apapun:
+
+```powershell
+# Default: ethereum, mint 1/wallet
+python quick_mint.py 0xCONTRACT_ADDRESS
+
+# Base chain, mint 2/wallet, custom RPC
+python quick_mint.py 0xCONTRACT base 2 --rpc https://base-mainnet.g.alchemy.com/v2/KEY
+
+# Sniper mode (signed phase)
+python quick_mint.py 0xCONTRACT --sniper-host 0.0.0.0 --sniper-secret $SECRET
+
+# Check-only (no transactions)
+python quick_mint.py 0xCONTRACT --mode check
+```
+
+Bot otomatis:
+
+1. Load wallet dari `wallets.txt`
+2. Connect ke chain + RPC
+3. Discover semua phase on-chain + best-effort OpenSea API enrichment
+4. Cek per-wallet eligibility
+5. Pick mode otomatis: **sniper** kalau ada signed phase, **public** kalau public live/upcoming
+6. Tampilkan dashboard, minta konfirmasi, jalankan
+
+Untuk drop kompleks dengan multi-phase + per-wallet eligibility + scheduler
+manual, pakai `main.py` (full-featured) — lihat section di bawah.
+
+### Mode interaktif (`main.py`)
 
 ```powershell
 python main.py
