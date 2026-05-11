@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSea SeaDrop Sniper
 // @namespace    https://github.com/local/opensea-mint-bot
-// @version      1.0.0
+// @version      1.1.0
 // @description  Auto-click Mint button, intercept signed-mint signature, forward to local bot for instant on-chain fire.
 // @author       local
 // @match        https://opensea.io/*
@@ -89,6 +89,14 @@
         firedAt: null,          // timestamp of auto-click
         contract: '',           // detected from URL/page
         wallet: '',             // detected from intercepted request
+        // Auto-detected phase queue (populated by parseMintSchedule()).
+        // When populated, the script auto-schedules clicks for each
+        // eligible phase in order, advancing after each successful fire.
+        // Set to [] to disable auto-mode and use manual time guard.
+        allPhases: [],          // every phase scraped (for display)
+        phaseQueue: [],          // eligible phases sorted by startMs
+        currentPhaseIdx: -1,     // which phaseQueue entry is active (-1 = none)
+        autoMode: false,         // true = phaseQueue overrides manual time guard
     };
 
     // Extract NFT contract address from current URL.
@@ -352,6 +360,14 @@
                 if (res.status >= 200 && res.status < 300) {
                     uiLog(`✓ Bot accepted (${res.status})`);
                     setStatus('fired → bot', '#22c55e');
+                    // Auto-advance to next phase if we're in auto-mode and queue has more
+                    if (state.autoMode && state.phaseQueue.length > 0 &&
+                        state.currentPhaseIdx + 1 < state.phaseQueue.length) {
+                        const nextP = state.phaseQueue[state.currentPhaseIdx + 1];
+                        const wait = Math.max(5000, nextP.startMs - Date.now() - 60000);
+                        uiLog(`◷ Will arm next phase (${nextP.name}) in ${Math.round(wait/1000)}s`);
+                        setTimeout(advancePhase, wait);
+                    }
                 } else {
                     uiLog(`✗ Bot rejected (${res.status}): ${res.responseText.slice(0, 80)}`);
                     setStatus('bot error', '#ef4444');
@@ -413,6 +429,151 @@
         const op = parseFloat(style.opacity || '1');
         if (op < 0.5) return false;
         return true;
+    }
+
+    // --------------------------------------------------------------------
+    // Mint schedule auto-detection
+    //
+    // Parses the OpenSea drop page DOM ("MINT SCHEDULE" section) to extract
+    // each phase's name, timing, eligibility, and limit. The connected
+    // wallet's eligibility per phase is rendered server-side ("ELIGIBLE" /
+    // "NOT ELIGIBLE" labels), so the parser pulls per-wallet state for free.
+    //
+    // Output: array of phase objects sorted by startMs ascending.
+    // --------------------------------------------------------------------
+    function parseMintSchedule() {
+        // Find the "MINT SCHEDULE" header label (a leaf element with that text)
+        const candidates = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,div,span');
+        let label = null;
+        for (const el of candidates) {
+            if (el.children.length !== 0) continue;
+            const t = (el.textContent || '').trim();
+            if (/^MINT\s+SCHEDULE$/i.test(t)) {
+                label = el;
+                break;
+            }
+        }
+        if (!label) {
+            vlog('parseMintSchedule: no MINT SCHEDULE label');
+            return [];
+        }
+        // Walk up to the nearest container that wraps multiple phase blocks
+        let container = label.parentElement;
+        for (let i = 0; i < 8 && container; i++) {
+            const txt = container.innerText || container.textContent || '';
+            const matches = txt.match(/Starts:/gi);
+            if (matches && matches.length >= 2) break;
+            container = container.parentElement;
+        }
+        if (!container) {
+            vlog('parseMintSchedule: no parent container with multiple phases');
+            return [];
+        }
+        const text = container.innerText || container.textContent || '';
+        // Pattern: <name>\nStarts: <date>\n[Ends: <date>\n]<price> ETH | LIMIT <n> PER WALLET\n<status>
+        // Each phase is anchored via LOOKBEHIND on previous status (or "MINT SCHEDULE"
+        // for the first one). Lookbehind avoids consuming the anchor so consecutive
+        // phases (e.g. KOL → GTD → FCFS) all match in one re.exec loop.
+        // Variable-length lookbehind requires V8 (Chrome 62+, Node 10+).
+        const re = /(?<=^|MINT\s+SCHEDULE\s+|(?:NOT\s+)?ELIGIBLE\s+)([\w][\w \-]*?)\s+Starts:\s+([^\n]+?)(?:\s+Ends:\s+([^\n]+?))?\s+([\d.]+)\s*ETH\s*\|\s*LIMIT\s+(\d+)\s+PER\s+WALLET\s+(NOT\s+ELIGIBLE|ELIGIBLE)/gi;
+        const phases = [];
+        let m;
+        while ((m = re.exec(text))) {
+            const startMs = parseTimeStr(m[2]);
+            const endMs = m[3] ? parseTimeStr(m[3]) : 0;
+            phases.push({
+                name: m[1].trim(),
+                startStr: m[2].trim(),
+                endStr: m[3] ? m[3].trim() : null,
+                startMs,
+                endMs,
+                priceEth: parseFloat(m[4]),
+                limit: parseInt(m[5], 10),
+                eligible: !/NOT/i.test(m[6]),
+            });
+        }
+        return phases;
+    }
+
+    function parseTimeStr(str) {
+        // Accepted forms (OpenSea typical):
+        //   "May 11 at 10:00 PM GMT+7"
+        //   "May 11, 2026 at 10:00 PM GMT+7"
+        if (!str) return 0;
+        const re = /(\w+)\s+(\d+)(?:,?\s+(\d{4}))?\s+at\s+(\d+):(\d+)\s+(AM|PM)\s+GMT([+-]\d+)/i;
+        const m = str.match(re);
+        if (!m) return 0;
+        const monthMap = {
+            jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+            jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+        };
+        const month = monthMap[m[1].slice(0, 3).toLowerCase()];
+        if (month === undefined) return 0;
+        const day = parseInt(m[2], 10);
+        const year = m[3] ? parseInt(m[3], 10) : new Date().getFullYear();
+        let hour = parseInt(m[4], 10) % 12;
+        if (m[6].toUpperCase() === 'PM') hour += 12;
+        const minute = parseInt(m[5], 10);
+        const tz = parseInt(m[7], 10); // +7 → 7
+        // Local time at GMT+tz → epoch UTC = local time - tz hours
+        return Date.UTC(year, month, day, hour - tz, minute);
+    }
+
+    function refreshPhases() {
+        const all = parseMintSchedule();
+        if (all.length === 0) {
+            vlog('refreshPhases: parser returned 0 phases');
+            return false;
+        }
+        state.allPhases = all;
+        const eligible = all
+            .filter(p => p.eligible && p.startMs > 0)
+            .sort((a, b) => a.startMs - b.startMs);
+        state.phaseQueue = eligible;
+        log(`Mint schedule parsed: ${all.length} phase(s) total, ${eligible.length} eligible`);
+        all.forEach(p => {
+            const tag = p.eligible ? '✓' : '·';
+            log(`  ${tag} ${p.name} @ ${new Date(p.startMs).toLocaleString()} | limit ${p.limit}`);
+        });
+        return eligible.length > 0;
+    }
+
+    function setActivePhase(idx) {
+        state.currentPhaseIdx = idx;
+        if (idx < 0 || idx >= state.phaseQueue.length) {
+            // No active phase — clear time guards (in-memory only, don't persist)
+            cfg.clickAfterUtcMs = 0;
+            cfg.clickBeforeUtcMs = 0;
+            cfg.phaseName = '';
+            renderPhase();
+            return;
+        }
+        const p = state.phaseQueue[idx];
+        cfg.clickAfterUtcMs = p.startMs;
+        // Default end = next phase start (or +30min if last)
+        const next = state.phaseQueue[idx + 1];
+        cfg.clickBeforeUtcMs = p.endMs > 0 ? p.endMs : (next ? next.startMs : p.startMs + 30 * 60 * 1000);
+        cfg.phaseName = p.name;
+        renderPhase();
+    }
+
+    function advancePhase() {
+        // Reset capture state, move to next eligible phase
+        state.captured = false;
+        state.firedAt = null;
+        const next = state.currentPhaseIdx + 1;
+        if (next >= state.phaseQueue.length) {
+            uiLog('✓ All eligible phases done.');
+            setStatus('done', '#22c55e');
+            setActivePhase(-1);
+            stopButtonPoller();
+            return;
+        }
+        setActivePhase(next);
+        const p = state.phaseQueue[next];
+        uiLog(`▶ Next phase: ${p.name} @ ${new Date(p.startMs).toLocaleTimeString()}`);
+        setStatus('armed', '#22c55e');
+        startButtonPoller();
     }
 
     function tryClickMint() {
@@ -502,6 +663,44 @@
     // --------------------------------------------------------------------
     function registerMenu() {
         try {
+            GM_registerMenuCommand('🔍 Auto-Detect Phases (rescan page)', () => {
+                const ok = refreshPhases();
+                if (!ok) {
+                    alert(
+                        'No phases detected.\n\n' +
+                        'Make sure you are on the OpenSea drop page (e.g.\n' +
+                        'https://opensea.io/collection/<slug>/overview) and the\n' +
+                        'MINT SCHEDULE section is visible. Connect your wallet\n' +
+                        'so OpenSea renders ELIGIBLE / NOT ELIGIBLE labels.'
+                    );
+                    state.autoMode = false;
+                    return;
+                }
+                state.autoMode = true;
+                state.currentPhaseIdx = -1;
+                // Pick first eligible phase that hasn't started yet, or the
+                // currently-live one. Phases that already ended are skipped.
+                const now = Date.now();
+                const upcomingIdx = state.phaseQueue.findIndex(p =>
+                    !(p.endMs > 0 && p.endMs < now)
+                );
+                if (upcomingIdx < 0) {
+                    alert('All eligible phases have already ended.');
+                    state.autoMode = false;
+                    return;
+                }
+                setActivePhase(upcomingIdx);
+                state.currentPhaseIdx = upcomingIdx - 1; // advancePhase increments
+                advancePhase();
+                const queue = state.phaseQueue.map(p =>
+                    `  ${p.name}  @  ${new Date(p.startMs).toLocaleString()}  (limit ${p.limit})`
+                ).join('\n');
+                alert(
+                    `Auto-mode armed for ${state.phaseQueue.length} phase(s):\n\n${queue}\n\n` +
+                    `First active: ${state.phaseQueue[upcomingIdx].name}\n` +
+                    `Will advance automatically after each successful fire.`
+                );
+            });
             GM_registerMenuCommand('🎯 Configure Sniper', () => {
                 const url = prompt('Bot URL (e.g. http://127.0.0.1:8888/signature):', cfg.botUrl);
                 if (url !== null) persist('botUrl', url.trim() || DEFAULTS.botUrl);
@@ -544,6 +743,10 @@
                     ms = parsed;
                 }
                 persist('clickAfterUtcMs', ms);
+                // Manual time-guard disables auto-mode so it doesn't fight the user's setting.
+                state.autoMode = false;
+                state.phaseQueue = [];
+                state.currentPhaseIdx = -1;
                 const phase = prompt('Phase name label (optional, e.g. "FCFS WL"):', cfg.phaseName);
                 if (phase !== null) persist('phaseName', phase.trim());
                 const endInput = prompt(
@@ -597,6 +800,44 @@
     // --------------------------------------------------------------------
     // Bootstrap
     // --------------------------------------------------------------------
+    function tryAutoDetectOnLoad() {
+        // Only auto-detect on drop pages, not on every OpenSea page
+        const isDropPage = /\/(collection|seadrop)\//.test(location.pathname);
+        if (!isDropPage) return;
+        // OpenSea is React-rendered — MINT SCHEDULE may not be in DOM yet.
+        // Retry every 2s up to 30s. Stop after first success.
+        let attempts = 0;
+        const maxAttempts = 15;
+        const tick = () => {
+            attempts++;
+            const ok = refreshPhases();
+            if (ok) {
+                state.autoMode = true;
+                state.currentPhaseIdx = -1;
+                const now = Date.now();
+                const upcomingIdx = state.phaseQueue.findIndex(p =>
+                    !(p.endMs > 0 && p.endMs < now)
+                );
+                if (upcomingIdx >= 0) {
+                    setActivePhase(upcomingIdx);
+                    state.currentPhaseIdx = upcomingIdx - 1;
+                    advancePhase();
+                    uiLog(`✓ Auto-armed for ${state.phaseQueue.length - upcomingIdx} phase(s)`);
+                } else {
+                    uiLog('All eligible phases already ended.');
+                }
+                return;
+            }
+            if (attempts < maxAttempts) {
+                setTimeout(tick, 2000);
+            } else {
+                vlog('Auto-detect: gave up after 30s. Use menu → 🔍 Auto-Detect Phases to retry.');
+            }
+        };
+        // First attempt after 1s to let React hydrate
+        setTimeout(tick, 1000);
+    }
+
     function init() {
         detectContract();
         ensurePanel();
@@ -618,8 +859,12 @@
                 renderContract();
                 // Reset state on navigation
                 if (!state.captured) startButtonPoller();
+                // Re-scan phases on new drop page
+                if (!state.autoMode) tryAutoDetectOnLoad();
             }
         }).observe(document, { subtree: true, childList: true });
+        // Auto-scan once at start (with retry for React hydration)
+        tryAutoDetectOnLoad();
         log('initialized', cfg);
     }
 

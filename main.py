@@ -629,7 +629,11 @@ def run_sniper_flow(
     nft_contract = cfg.get("nft_contract", "")
 
     fire_lock = threading.Lock()
-    fired_wallets: set = set()
+    # Dedup signatures by (wallet, salt) — same salt fired twice = duplicate;
+    # different salts (different phases) from the same wallet = OK to fire both.
+    # This unblocks multi-phase scenarios like FCFS WL @ 22:45 + Public @ 23:15
+    # where the user wants to mint both phases with the same wallet.
+    fired_signatures: set = set()
 
     def fire_callback(payload: "SignaturePayload"):
         addr = (payload.wallet or "").lower()
@@ -657,10 +661,14 @@ def run_sniper_flow(
             log.info("Sniper: phase check OK wallet=%s active_phase=%s",
                      short_addr(addr), phase_label)
 
+        sig_key = (addr, (payload.salt or "").lower())
         with fire_lock:
-            if addr in fired_wallets:
-                return False, f"wallet {short_addr(addr)} already fired"
-            fired_wallets.add(addr)
+            if sig_key in fired_signatures:
+                return False, (
+                    f"wallet {short_addr(addr)} already fired this salt "
+                    f"({payload.salt[:14]}…) — duplicate request"
+                )
+            fired_signatures.add(sig_key)
 
         # Build a synthetic eligibility entry containing the signature
         elig = WalletEligibility(
