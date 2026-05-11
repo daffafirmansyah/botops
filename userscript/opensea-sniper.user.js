@@ -44,6 +44,10 @@
         pollIntervalMs: 50,                          // button enable poll rate
         targetContract: '',                          // optional filter (lowercase 0x..)
         targetPhase: '',                             // 'public' | 'allowlist' | 'signed' | ''
+        clickAfterUtcMs: 0,                          // 0 = no time gate. Set epoch ms to delay click until that time.
+        clickBeforeUtcMs: 0,                         // 0 = no upper bound. Set to skip click after phase ends.
+        autoResetAfterMs: 90000,                     // reset state if no signature captured N ms after click (0 = disabled)
+        phaseName: '',                               // free-form label for panel UI (e.g. 'FCFS WL')
         verboseLogs: false,
     };
 
@@ -55,6 +59,10 @@
         pollIntervalMs: GM_getValue('pollIntervalMs', DEFAULTS.pollIntervalMs),
         targetContract: GM_getValue('targetContract', DEFAULTS.targetContract),
         targetPhase: GM_getValue('targetPhase', DEFAULTS.targetPhase),
+        clickAfterUtcMs: GM_getValue('clickAfterUtcMs', DEFAULTS.clickAfterUtcMs),
+        clickBeforeUtcMs: GM_getValue('clickBeforeUtcMs', DEFAULTS.clickBeforeUtcMs),
+        autoResetAfterMs: GM_getValue('autoResetAfterMs', DEFAULTS.autoResetAfterMs),
+        phaseName: GM_getValue('phaseName', DEFAULTS.phaseName),
         verboseLogs: GM_getValue('verboseLogs', DEFAULTS.verboseLogs),
     };
 
@@ -119,6 +127,10 @@
                 <strong style="font-size:13px">SeaDrop Sniper</strong>
                 <span id="sniper-status" style="margin-left:auto;font-size:11px;color:#22c55e">armed</span>
             </div>
+            <div id="sniper-phase" style="font-size:11px;color:#fbbf24;margin-bottom:4px;display:none">
+                phase: <span id="sniper-phase-name">-</span>
+                <span id="sniper-countdown" style="float:right;color:#fbbf24;font-variant-numeric:tabular-nums"></span>
+            </div>
             <div id="sniper-info" style="font-size:11px;color:#cbd5e1;margin-bottom:6px">
                 contract: <span id="sniper-contract">-</span><br>
                 bot: <span id="sniper-bot">${escapeHtml(cfg.botUrl)}</span>
@@ -127,6 +139,7 @@
         `;
         document.body.appendChild(panel);
         renderContract();
+        renderPhase();
     }
 
     function escapeHtml(s) {
@@ -146,6 +159,46 @@
     function renderContract() {
         const el = document.getElementById('sniper-contract');
         if (el) el.textContent = state.contract || '(detect on Mint click)';
+    }
+
+    function renderPhase() {
+        const wrap = document.getElementById('sniper-phase');
+        const nameEl = document.getElementById('sniper-phase-name');
+        if (!wrap || !nameEl) return;
+        const hasTarget = cfg.clickAfterUtcMs > 0 || cfg.phaseName;
+        wrap.style.display = hasTarget ? '' : 'none';
+        nameEl.textContent = cfg.phaseName || '(target time set)';
+        updateCountdown();
+    }
+
+    function formatCountdown(ms) {
+        if (ms <= 0) return 'OPEN';
+        const totalSec = Math.floor(ms / 1000);
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        const pad = (n) => String(n).padStart(2, '0');
+        if (h > 0) return `T-${h}h ${pad(m)}m ${pad(s)}s`;
+        return `T-${pad(m)}m ${pad(s)}s`;
+    }
+
+    function updateCountdown() {
+        const el = document.getElementById('sniper-countdown');
+        if (!el) return;
+        if (!cfg.clickAfterUtcMs) {
+            el.textContent = '';
+            return;
+        }
+        const remain = cfg.clickAfterUtcMs - Date.now();
+        el.textContent = formatCountdown(remain);
+        // Yellow before open, green at open, red after click window ended
+        if (cfg.clickBeforeUtcMs && Date.now() > cfg.clickBeforeUtcMs) {
+            el.style.color = '#ef4444';
+        } else if (remain <= 0) {
+            el.style.color = '#22c55e';
+        } else {
+            el.style.color = '#fbbf24';
+        }
     }
 
     function uiLog(msg) {
@@ -363,8 +416,21 @@
     }
 
     function tryClickMint() {
-        if (state.firedAt) return;     // already clicked once
+        if (state.firedAt) return;     // already clicked once this cycle
         if (!cfg.autoClick) return;
+        const now = Date.now();
+        // Time guards — prevent firing during wrong phase
+        if (cfg.clickAfterUtcMs && now < cfg.clickAfterUtcMs) {
+            // Not yet target phase open
+            return;
+        }
+        if (cfg.clickBeforeUtcMs && now >= cfg.clickBeforeUtcMs) {
+            // Target phase window ended
+            vlog('click window ended — disarming');
+            stopButtonPoller();
+            setStatus('window ended', '#ef4444');
+            return;
+        }
         const btn = findMintButton();
         if (!btn) return;
         if (!isClickable(btn)) {
@@ -372,8 +438,9 @@
             return;
         }
         // Click!
-        state.firedAt = Date.now();
-        uiLog('▶ Mint button enabled — auto-clicking');
+        state.firedAt = now;
+        const phaseLabel = cfg.phaseName ? ` [${cfg.phaseName}]` : '';
+        uiLog(`▶ Mint button enabled${phaseLabel} — auto-clicking`);
         setStatus('clicked', '#22c55e');
         try {
             btn.click();
@@ -383,6 +450,22 @@
         // Stop polling after a short grace period — keep just in case the
         // first click was eaten by a modal animation.
         setTimeout(stopButtonPoller, 2000);
+        // Auto-reset: if no signature is captured within autoResetAfterMs,
+        // assume the click was for a phase this wallet wasn't eligible for
+        // (e.g. KOL/GTD window for a FCFS-only wallet). Reset state so the
+        // next phase open can trigger another click.
+        if (cfg.autoResetAfterMs > 0) {
+            const clickedAt = state.firedAt;
+            setTimeout(() => {
+                if (state.captured) return;            // success — keep state
+                if (state.firedAt !== clickedAt) return; // already reset by user
+                uiLog(`⟲ No signature in ${Math.round(cfg.autoResetAfterMs/1000)}s — auto-reset for next phase`);
+                state.firedAt = null;
+                state.captured = false;
+                setStatus('armed', '#22c55e');
+                startButtonPoller();
+            }, cfg.autoResetAfterMs);
+        }
     }
 
     // --------------------------------------------------------------------
@@ -433,12 +516,73 @@
                 const elBot = document.getElementById('sniper-bot');
                 if (elBot) elBot.textContent = cfg.botUrl;
             });
+            GM_registerMenuCommand('⏰ Set Target Phase Time', () => {
+                const help = (
+                    'Enter target phase opening time.\n\n' +
+                    'Accepted formats:\n' +
+                    '  • ISO UTC:       2026-05-11T15:45:00Z\n' +
+                    '  • ISO local:     2026-05-11T22:45:00+07:00\n' +
+                    '  • Local time:    2026-05-11 22:45  (uses your browser timezone)\n' +
+                    '  • Blank/0:       clear time guard\n\n' +
+                    'Tampermonkey will NOT auto-click before this time.'
+                );
+                const current = cfg.clickAfterUtcMs ? new Date(cfg.clickAfterUtcMs).toISOString() : '';
+                const input = prompt(help, current);
+                if (input === null) return;
+                const trimmed = input.trim();
+                let ms = 0;
+                if (trimmed && trimmed !== '0') {
+                    let parsed = Date.parse(trimmed);
+                    if (isNaN(parsed) && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(trimmed)) {
+                        // "YYYY-MM-DD HH:MM" without timezone → assume local
+                        parsed = Date.parse(trimmed.replace(' ', 'T'));
+                    }
+                    if (isNaN(parsed)) {
+                        alert(`Could not parse: ${trimmed}\nKept previous value.`);
+                        return;
+                    }
+                    ms = parsed;
+                }
+                persist('clickAfterUtcMs', ms);
+                const phase = prompt('Phase name label (optional, e.g. "FCFS WL"):', cfg.phaseName);
+                if (phase !== null) persist('phaseName', phase.trim());
+                const endInput = prompt(
+                    'Optional: phase END time (skip clicks after this). Blank/0 = no upper bound.',
+                    cfg.clickBeforeUtcMs ? new Date(cfg.clickBeforeUtcMs).toISOString() : ''
+                );
+                if (endInput !== null) {
+                    const et = endInput.trim();
+                    let endMs = 0;
+                    if (et && et !== '0') {
+                        let p = Date.parse(et);
+                        if (isNaN(p) && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(et)) {
+                            p = Date.parse(et.replace(' ', 'T'));
+                        }
+                        if (!isNaN(p)) endMs = p;
+                    }
+                    persist('clickBeforeUtcMs', endMs);
+                }
+                const summary = (
+                    `Target time:  ${ms ? new Date(ms).toString() : '(none)'}\n` +
+                    `Phase label:  ${cfg.phaseName || '(none)'}\n` +
+                    `End time:     ${cfg.clickBeforeUtcMs ? new Date(cfg.clickBeforeUtcMs).toString() : '(none)'}`
+                );
+                alert('Time guard updated.\n\n' + summary);
+                renderPhase();
+            });
             GM_registerMenuCommand('🔄 Reset Capture State', () => {
                 state.captured = false;
                 state.firedAt = null;
                 setStatus('armed', '#22c55e');
                 uiLog('State reset — ready for next drop');
                 startButtonPoller();
+            });
+            GM_registerMenuCommand('🧹 Clear Time Guard', () => {
+                persist('clickAfterUtcMs', 0);
+                persist('clickBeforeUtcMs', 0);
+                persist('phaseName', '');
+                renderPhase();
+                alert('Time guard cleared. Sniper will click as soon as Mint button is enabled.');
             });
             GM_registerMenuCommand('📊 Toggle Verbose Logs', () => {
                 persist('verboseLogs', !cfg.verboseLogs);
@@ -457,9 +601,12 @@
         detectContract();
         ensurePanel();
         renderContract();
+        renderPhase();
         registerMenu();
         patchEthereum();
         startButtonPoller();
+        // Countdown ticker — refresh phase countdown every second
+        setInterval(updateCountdown, 1000);
         // Re-patch ethereum on every event in case MM injects late
         window.addEventListener('ethereum#initialized', patchEthereum, { once: true });
         // Re-detect contract on SPA navigations
